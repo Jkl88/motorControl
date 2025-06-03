@@ -1,5 +1,5 @@
 /*
-* v1
+* v1.0.2
 */
 
 #include "motorControl.h"
@@ -9,10 +9,11 @@ Motor* Motor::_instance = nullptr;
 const int8_t Motor::_encoderStates[16] = { 0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0 };
 const int Motor::PULSES_PER_REVOLUTION = 60;
 
-Motor::Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime) {
+Motor::Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime) {
     _hallApin = hallApin;
     _hallBpin = hallBpin;
     _pwmPin = pwmPin;
+    _pwmCannel = pwmCannel;
     _dirPin = dirPin;
     _brakePin = brakePin;
     _rampTime = rampTime;
@@ -37,9 +38,9 @@ void Motor::begin() {
     digitalWrite(_dirPin, LOW);
 
     // Настройка ШИМ для ESP32
-    ledcSetup(0, 5000, 8);     // Канал 0, 5 кГц, 8 бит
-    ledcAttachPin(_pwmPin, 0);  // Привязка пина PWM к каналу 0
-    ledcWrite(0, 0);            // Начальная скорость 0
+    ledcSetup(_pwmCannel, 5000, 8);      // Канал _pwmCannel, 5 кГц, 8 бит
+    ledcAttachPin(_pwmPin, _pwmCannel);  // Привязка пина PWM к каналу _pwmCannel
+    ledcWrite(_pwmCannel, 0);            // Начальная скорость 0
 
     // Инициализация энкодера
     _lastHallState = (digitalRead(_hallApin) << 1) | digitalRead(_hallBpin);

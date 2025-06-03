@@ -1,5 +1,5 @@
 /*
-* v1
+* v1.0.2
 */
 
 #ifndef _motorControl_h
@@ -8,7 +8,7 @@
 
 class Motor {
 public:
-    Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime = 500);
+    Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime = 500);
     void begin();
     void setSpeed(int speed, bool brake);
     void update();
