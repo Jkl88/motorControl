@@ -7,7 +7,7 @@
 
 Motor* Motor::_instance = nullptr;
 const int8_t Motor::_encoderStates[16] = { 0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0 };
-const int Motor::PULSES_PER_REVOLUTION = 60;
+//const int Motor::PULSES_PER_REVOLUTION = 60;
 
 Motor::Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime) {
     _hallApin = hallApin;
@@ -82,7 +82,7 @@ void Motor::applyMotorControl() {
     // Обработка торможения
     if (_targetBrake) {
         digitalWrite(_brakePin, LOW);  // Активировать тормоз (GND)
-        ledcWrite(0, 0);               // Отключить ШИМ
+        ledcWrite(_pwmCannel, 0);               // Отключить ШИМ
         _currentSpeed = 0;
         _brakeActive = true;
         _directionChangePending = false;
@@ -101,7 +101,7 @@ void Motor::applyMotorControl() {
         if (abs(_currentRPM) > 5.0) { // Мотор еще вращается
             digitalWrite(_brakePin, LOW); // Активировать тормоз
             _directionChangePending = true;
-            ledcWrite(0, 0); // Отключить ШИМ
+            ledcWrite(_pwmCannel, 0); // Отключить ШИМ
             _currentSpeed = 0;
             return;
         }
@@ -131,14 +131,14 @@ void Motor::applyPWM() {
 
     if (targetDir == 1) {
         digitalWrite(_dirPin, HIGH); // Вперед
-        ledcWrite(0, pwmValue);
+        ledcWrite(_pwmCannel, pwmValue);
     }
     else if (targetDir == -1) {
         digitalWrite(_dirPin, LOW);  // Назад (GND)
-        ledcWrite(0, pwmValue);
+        ledcWrite(_pwmCannel, pwmValue);
     }
     else {
-        ledcWrite(0, 0); // Остановка
+        ledcWrite(_pwmCannel, 0); // Остановка
     }
 
     _lastAppliedDirection = targetDir;

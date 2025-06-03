@@ -5,6 +5,9 @@
 #ifndef _motorControl_h
 #define _motorControl_h
 #include <Arduino.h>
+#include <driver/ledc.h>
+#include <stdint.h>
+#include <math.h>
 
 class Motor {
 public:
@@ -15,10 +18,11 @@ public:
     float getRPM();
     int getDirection(); // 1 = forward, -1 = backward, 0 = stopped
     void setRampTime(uint16_t rampTime);
+    void PLOTTER_SERIAL();
 
 private:
     uint8_t _hallApin, _hallBpin;
-    uint8_t _pwmPin, _dirPin, _brakePin;
+    uint8_t _pwmPin, _dirPin, _brakePin, _pwmCannel;
     static const int PULSES_PER_REVOLUTION = 60;
 
     volatile long _encoderCount;
