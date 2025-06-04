@@ -6,7 +6,7 @@
 #define PULSES_PER_REVOLUTION 60
 #define MAX_MOTORS 6
 
-// Абстрактный базовый класс для двигателя
+// РђР±СЃС‚СЂР°РєС‚РЅС‹Р№ Р±Р°Р·РѕРІС‹Р№ РєР»Р°СЃСЃ РґР»СЏ РґРІРёРіР°С‚РµР»СЏ
 class BaseMotor {
 public:
     virtual void begin() = 0;
@@ -17,7 +17,7 @@ public:
     virtual ~BaseMotor() = default;
 };
 
-// Универсальный класс управления двигателем с одним или двумя датчиками Холла
+// РЈРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№ РєР»Р°СЃСЃ СѓРїСЂР°РІР»РµРЅРёСЏ РґРІРёРіР°С‚РµР»РµРј СЃ РѕРґРЅРёРј РёР»Рё РґРІСѓРјСЏ РґР°С‚С‡РёРєР°РјРё РҐРѕР»Р»Р°
 class HallMotor : public BaseMotor {
 public:
     HallMotor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t minPwm,
@@ -31,7 +31,7 @@ public:
         _encoderCount(0), _lastHallState(0), _currentDirection(0), _lastDirection(1),
         _directionChangeTime(0) {
 
-        // Определяем режим: один датчик (если hallBpin == 255) или два
+        // РћРїСЂРµРґРµР»СЏРµРј СЂРµР¶РёРј: РѕРґРёРЅ РґР°С‚С‡РёРє (РµСЃР»Рё hallBpin == 255) РёР»Рё РґРІР°
         _singleHall = (hallBpin == 255);
     }
 
@@ -42,18 +42,18 @@ public:
         pinMode(_brakePin, OUTPUT);
         pinMode(_pwmPin, OUTPUT);
 
-        digitalWrite(_brakePin, HIGH); // Отпустить тормоз
+        digitalWrite(_brakePin, HIGH); // РћС‚РїСѓСЃС‚РёС‚СЊ С‚РѕСЂРјРѕР·
         digitalWrite(_dirPin, LOW);
 
-        // Настройка PWM
+        // РќР°СЃС‚СЂРѕР№РєР° PWM
         ledcSetup(_pwmCannel, 5000, 8);
         ledcAttachPin(_pwmPin, _pwmCannel);
         ledcWrite(_pwmCannel, 0);
 
-        // Начальное состояние энкодера
+        // РќР°С‡Р°Р»СЊРЅРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ СЌРЅРєРѕРґРµСЂР°
         _lastHallState = (digitalRead(_hallApin) << 1) | (_singleHall ? 0 : digitalRead(_hallBpin));
 
-        // Назначение обработчика прерываний из пула
+        // РќР°Р·РЅР°С‡РµРЅРёРµ РѕР±СЂР°Р±РѕС‚С‡РёРєР° РїСЂРµСЂС‹РІР°РЅРёР№ РёР· РїСѓР»Р°
         for (int i = 0; i < MAX_MOTORS; i++) {
             if (_instances[i] == nullptr) {
                 _instances[i] = this;
@@ -109,7 +109,7 @@ public:
     int getDirection() override { return _currentDirection; }
 
 private:
-    bool _singleHall; // true - один датчик Холла, false - два
+    bool _singleHall; // true - РѕРґРёРЅ РґР°С‚С‡РёРє РҐРѕР»Р»Р°, false - РґРІР°
     uint8_t _hallApin, _hallBpin, _pwmPin, _pwmCannel, _minPwm, _dirPin, _brakePin;
     int _targetPwm, _currentPwm;
     bool _targetBrake, _brakeActive, _directionChangePending;
@@ -123,7 +123,7 @@ private:
     float _currentRPM;
     unsigned long _lastUpdateTime;
 
-    // Таблица переходов энкодера
+    // РўР°Р±Р»РёС†Р° РїРµСЂРµС…РѕРґРѕРІ СЌРЅРєРѕРґРµСЂР°
     static constexpr int8_t _encoderStates[16] = { 0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0 };
     static HallMotor* _instances[MAX_MOTORS];
 
@@ -141,27 +141,27 @@ private:
     };
 
     void applyMotorControl() {
-        // Принудительное торможение по команде
+        // РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРµ С‚РѕСЂРјРѕР¶РµРЅРёРµ РїРѕ РєРѕРјР°РЅРґРµ
         if (_targetBrake) {
-            digitalWrite(_brakePin, LOW);  // активируем тормоз
-            ledcWrite(_pwmCannel, 0);      // выключаем ШИМ
+            digitalWrite(_brakePin, LOW);  // Р°РєС‚РёРІРёСЂСѓРµРј С‚РѕСЂРјРѕР·
+            ledcWrite(_pwmCannel, 0);      // РІС‹РєР»СЋС‡Р°РµРј РЁРРњ
             _currentPwm = 0;
             _brakeActive = true;
             _directionChangePending = false;
             return;
         }
         else {
-            digitalWrite(_brakePin, HIGH); // отпускаем тормоз
+            digitalWrite(_brakePin, HIGH); // РѕС‚РїСѓСЃРєР°РµРј С‚РѕСЂРјРѕР·
             _brakeActive = false;
         }
 
         int targetDir = (_targetPwm == 0) ? 0 : (_targetPwm > 0 ? 1 : -1);
 
-        // Логика смены направления (для одного датчика Холла)
+        // Р›РѕРіРёРєР° СЃРјРµРЅС‹ РЅР°РїСЂР°РІР»РµРЅРёСЏ (РґР»СЏ РѕРґРЅРѕРіРѕ РґР°С‚С‡РёРєР° РҐРѕР»Р»Р°)
         if (_singleHall && targetDir != 0 && targetDir != _lastDirection) {
             if (abs(_currentRPM) < 1.0) {
                 if (millis() - _directionChangeTime > _dirChangeDelay) {
-                    _lastDirection = targetDir; // смена направления
+                    _lastDirection = targetDir; // СЃРјРµРЅР° РЅР°РїСЂР°РІР»РµРЅРёСЏ
                 }
                 else {
                     digitalWrite(_brakePin, LOW);
@@ -177,7 +177,7 @@ private:
             }
         }
 
-        // Логика смены направления (для двух датчиков Холла)
+        // Р›РѕРіРёРєР° СЃРјРµРЅС‹ РЅР°РїСЂР°РІР»РµРЅРёСЏ (РґР»СЏ РґРІСѓС… РґР°С‚С‡РёРєРѕРІ РҐРѕР»Р»Р°)
         if (!_singleHall && targetDir != 0 && targetDir != _currentDirection) {
             if (abs(_currentRPM) > 5.0) {
                 digitalWrite(_brakePin, LOW);
@@ -191,7 +191,7 @@ private:
             }
         }
 
-        // Плавная регулировка ШИМ
+        // РџР»Р°РІРЅР°СЏ СЂРµРіСѓР»РёСЂРѕРІРєР° РЁРРњ
         if (millis() - _lastRampTime > 20) {
             if (_currentPwm < _targetPwm) {
                 _currentPwm = min(_targetPwm, _currentPwm + _rampIncrement);
@@ -232,7 +232,7 @@ private:
         uint8_t state = (_lastHallState << 2) | newState;
         int8_t change = _encoderStates[state & 0x0F];
 
-        // Если один датчик, используем последнее известное направление
+        // Р•СЃР»Рё РѕРґРёРЅ РґР°С‚С‡РёРє, РёСЃРїРѕР»СЊР·СѓРµРј РїРѕСЃР»РµРґРЅРµРµ РёР·РІРµСЃС‚РЅРѕРµ РЅР°РїСЂР°РІР»РµРЅРёРµ
         _encoderCount += (change == 0) ? (_lastDirection) : change;
         if (change != 0) {
             _lastDirection = (change > 0) ? 1 : -1;
