@@ -1,60 +1,75 @@
 /*
-* v1.0.2
+* v1.0.3
 */
 
 #ifndef _motorControl_h
 #define _motorControl_h
 #include <Arduino.h>
-#include <driver/ledc.h>
-#include <stdint.h>
-#include <math.h>
+
+// Пределы ШИМ
+#define MIN_PWM -255
+#define MAX_PWM 255
+
+// Кол-во импульсов на один оборот
+#define PULSES_PER_REVOLUTION 60
 
 class Motor {
 public:
-    Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime = 500);
+    Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel,
+        uint8_t minPwm, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime = 200);
+
     void begin();
-    void setSpeed(int speed, bool brake);
-    void update();
-    float getRPM();
-    int getDirection(); // 1 = forward, -1 = backward, 0 = stopped
+    void setPwm(int pwm, bool brake = false);
     void setRampTime(uint16_t rampTime);
-    void PLOTTER_SERIAL();
+    void update();
+
+    float getRPM();
+    int getDirection();
 
 private:
-    uint8_t _hallApin, _hallBpin;
-    uint8_t _pwmPin, _dirPin, _brakePin, _pwmCannel;
-    static const int PULSES_PER_REVOLUTION = 60;
+    // Пины
+    uint8_t _hallApin;
+    uint8_t _hallBpin;
+    uint8_t _pwmPin;
+    uint8_t _pwmCannel;
+    uint8_t _minPwm;
+    uint8_t _dirPin;
+    uint8_t _brakePin;
 
-    volatile long _encoderCount;
-    volatile uint8_t _lastHallState;
-    volatile int _lastDirection;
-    long _lastCount;
-    unsigned long _lastUpdateTime;
-    float _currentRPM;
-    int _currentDirection;
-
-    int _targetSpeed;
-    int _currentSpeed;
+    // Состояние
+    int _targetPwm;
+    int _currentPwm;
     bool _targetBrake;
-    int _lastAppliedDirection;
     bool _brakeActive;
     bool _directionChangePending;
 
-    uint16_t _rampTime;          // Время плавного разгона (мс)
-    unsigned long _lastRampTime; // Время последнего изменения скорости
-    int _rampIncrement;          // Шаг изменения скорости за цикл
+    // Направление и ШИМ
+    int _lastAppliedDirection;
+    int _currentDirection;
+    int _lastDirection;
 
-    static const int8_t _encoderStates[16];
-    static Motor* _instance;
+    // Плавность
+    uint16_t _rampTime;
+    uint16_t _rampIncrement;
+    unsigned long _lastRampTime;
 
-    void handleInterrupt();
+    // Энкодер
+    volatile long _encoderCount;
+    long _lastCount;
+    uint8_t _lastHallState;
+    float _currentRPM;
+    unsigned long _lastUpdateTime;
+
+    // Вспомогательные функции
     void applyMotorControl();
     void applyPWM();
-    static void _handleInterruptA();
-    static void _handleInterruptB();
+    void handleInterrupt();
 
-    const int MAX_SPEED = 255;
-    const int MIN_SPEED = -255;
+    static const int8_t _encoderStates[16];
+
+    // Прерывания
+    static void IRAM_ATTR _handleInterruptA(void* arg);
+    static void IRAM_ATTR _handleInterruptB(void* arg);
 };
 
 #endif

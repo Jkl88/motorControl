@@ -1,29 +1,29 @@
 /*
-* v1.0.2
+* v1.0.3
 */
 
 #include "motorControl.h"
 
-
-Motor* Motor::_instance = nullptr;
 const int8_t Motor::_encoderStates[16] = { 0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0 };
-//const int Motor::PULSES_PER_REVOLUTION = 60;
 
-Motor::Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime) {
+Motor::Motor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t minPwm, uint8_t dirPin, uint8_t brakePin, uint16_t rampTime) {
     _hallApin = hallApin;
     _hallBpin = hallBpin;
     _pwmPin = pwmPin;
     _pwmCannel = pwmCannel;
+    _minPwm = minPwm;
     _dirPin = dirPin;
     _brakePin = brakePin;
     _rampTime = rampTime;
-    _targetSpeed = 0;
-    _currentSpeed = 0;
+    _targetPwm = 0;
+    _currentPwm = 0;
     _targetBrake = false;
     _lastAppliedDirection = 0;
     _brakeActive = false;
     _directionChangePending = false;
-    _rampIncrement = 5; // По умолчанию
+    _rampIncrement = 5;
+    _instanceA = nullptr;
+    _instanceB = nullptr;
 }
 
 void Motor::begin() {
@@ -33,22 +33,17 @@ void Motor::begin() {
     pinMode(_brakePin, OUTPUT);
     pinMode(_pwmPin, OUTPUT);
 
-    // Инициализация выходов
-    digitalWrite(_brakePin, HIGH); // Тормоз неактивен (HIGH)
+    digitalWrite(_brakePin, HIGH);
     digitalWrite(_dirPin, LOW);
 
-    // Настройка ШИМ для ESP32
-    ledcSetup(_pwmCannel, 5000, 8);      // Канал _pwmCannel, 5 кГц, 8 бит
-    ledcAttachPin(_pwmPin, _pwmCannel);  // Привязка пина PWM к каналу _pwmCannel
-    ledcWrite(_pwmCannel, 0);            // Начальная скорость 0
+    ledcSetup(_pwmCannel, 5000, 8);
+    ledcAttachPin(_pwmPin, _pwmCannel);
+    ledcWrite(_pwmCannel, 0);
 
-    // Инициализация энкодера
     _lastHallState = (digitalRead(_hallApin) << 1) | digitalRead(_hallBpin);
-    _instance = this;
 
-    // Настройка прерываний с защитой от дребезга
-    attachInterrupt(digitalPinToInterrupt(_hallApin), _handleInterruptA, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(_hallBpin), _handleInterruptB, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(_hallApin), _handleInterruptA, this);
+    attachInterruptArg(digitalPinToInterrupt(_hallBpin), _handleInterruptB, this);
 
     _lastUpdateTime = millis();
     _lastRampTime = millis();
@@ -58,19 +53,16 @@ void Motor::begin() {
     _currentDirection = 0;
 }
 
-void Motor::setSpeed(int speed, bool brake) {
-    // Ограничение скорости
-    speed = constrain(speed, MIN_SPEED, MAX_SPEED);
-
-    _targetSpeed = speed;
+void Motor::setPwm(int pwm, bool brake) {
+    pwm = constrain(pwm, MIN_PWM, MAX_PWM);
+    _targetPwm = pwm;
     _targetBrake = brake;
 
-    // Рассчет шага плавности
     if (_rampTime > 0) {
-        _rampIncrement = max(1, abs(_targetSpeed - _currentSpeed) * 20 / _rampTime);
+        _rampIncrement = max(1, abs(_targetPwm - _currentPwm) * 20 / _rampTime);
     }
     else {
-        _rampIncrement = MAX_SPEED + 1; // Мгновенное изменение
+        _rampIncrement = MAX_PWM + 1;
     }
 }
 
@@ -79,30 +71,27 @@ void Motor::setRampTime(uint16_t rampTime) {
 }
 
 void Motor::applyMotorControl() {
-    // Обработка торможения
     if (_targetBrake) {
-        digitalWrite(_brakePin, LOW);  // Активировать тормоз (GND)
-        ledcWrite(_pwmCannel, 0);               // Отключить ШИМ
-        _currentSpeed = 0;
+        digitalWrite(_brakePin, LOW);
+        ledcWrite(_pwmCannel, 0);
+        _currentPwm = 0;
         _brakeActive = true;
         _directionChangePending = false;
         return;
     }
     else {
-        digitalWrite(_brakePin, HIGH); // Отпустить тормоз
+        digitalWrite(_brakePin, HIGH);
         _brakeActive = false;
     }
 
-    // Определение целевого направления
-    int targetDir = (_targetSpeed == 0) ? 0 : (_targetSpeed > 0 ? 1 : -1);
+    int targetDir = (_targetPwm == 0) ? 0 : (_targetPwm > 0 ? 1 : -1);
 
-    // Проверка необходимости смены направления
-    if (targetDir != _lastAppliedDirection && _lastAppliedDirection != 0) {
-        if (abs(_currentRPM) > 5.0) { // Мотор еще вращается
-            digitalWrite(_brakePin, LOW); // Активировать тормоз
+    if (targetDir != 0 && targetDir != _currentDirection) {
+        if (abs(_currentRPM) > 5.0) {
+            digitalWrite(_brakePin, LOW);
             _directionChangePending = true;
-            ledcWrite(_pwmCannel, 0); // Отключить ШИМ
-            _currentSpeed = 0;
+            ledcWrite(_pwmCannel, 0);
+            _currentPwm = 0;
             return;
         }
         else {
@@ -110,60 +99,56 @@ void Motor::applyMotorControl() {
         }
     }
 
-    // Плавное изменение скорости
-    if (millis() - _lastRampTime > 20) { // Обновление каждые 20 мс
-        if (_currentSpeed < _targetSpeed) {
-            _currentSpeed = min(_targetSpeed, _currentSpeed + _rampIncrement);
+    if (millis() - _lastRampTime > 20) {
+        if (_currentPwm < _targetPwm) {
+            _currentPwm = min(_targetPwm, _currentPwm + _rampIncrement);
         }
-        else if (_currentSpeed > _targetSpeed) {
-            _currentSpeed = max(_targetSpeed, _currentSpeed - _rampIncrement);
+        else if (_currentPwm > _targetPwm) {
+            _currentPwm = max(_targetPwm, _currentPwm - _rampIncrement);
         }
         _lastRampTime = millis();
     }
 
-    // Применение ШИМ и направления
     applyPWM();
 }
 
 void Motor::applyPWM() {
-    int pwmValue = abs(_currentSpeed);
-    int targetDir = (_currentSpeed == 0) ? 0 : (_currentSpeed > 0 ? 1 : -1);
+    int pwmValue = map(abs(_currentPwm), 0, MAX_PWM, _minPwm, MAX_PWM);
+    int targetDir = (_currentPwm == 0) ? 0 : (_currentPwm > 0 ? 1 : -1);
 
     if (targetDir == 1) {
-        digitalWrite(_dirPin, HIGH); // Вперед
+        digitalWrite(_dirPin, HIGH);
         ledcWrite(_pwmCannel, pwmValue);
     }
     else if (targetDir == -1) {
-        digitalWrite(_dirPin, LOW);  // Назад (GND)
+        digitalWrite(_dirPin, LOW);
         ledcWrite(_pwmCannel, pwmValue);
     }
     else {
-        ledcWrite(_pwmCannel, 0); // Остановка
+        ledcWrite(_pwmCannel, 0);
     }
 
     _lastAppliedDirection = targetDir;
 }
 
-void Motor::_handleInterruptA() {
-    if (_instance) {
-        static unsigned long lastInterruptTime = 0;
-        unsigned long currentTime = millis();
-        if (currentTime - lastInterruptTime > 2) {
-            _instance->handleInterrupt();
-        }
-        lastInterruptTime = currentTime;
+void IRAM_ATTR Motor::_handleInterruptA(void* arg) {
+    Motor* instance = static_cast<Motor*>(arg);
+    static unsigned long lastInterruptTime = 0;
+    unsigned long currentTime = millis();
+    if (currentTime - lastInterruptTime > 2) {
+        instance->handleInterrupt();
     }
+    lastInterruptTime = currentTime;
 }
 
-void Motor::_handleInterruptB() {
-    if (_instance) {
-        static unsigned long lastInterruptTime = 0;
-        unsigned long currentTime = millis();
-        if (currentTime - lastInterruptTime > 2) {
-            _instance->handleInterrupt();
-        }
-        lastInterruptTime = currentTime;
+void IRAM_ATTR Motor::_handleInterruptB(void* arg) {
+    Motor* instance = static_cast<Motor*>(arg);
+    static unsigned long lastInterruptTime = 0;
+    unsigned long currentTime = millis();
+    if (currentTime - lastInterruptTime > 2) {
+        instance->handleInterrupt();
     }
+    lastInterruptTime = currentTime;
 }
 
 void Motor::handleInterrupt() {
@@ -183,18 +168,16 @@ void Motor::handleInterrupt() {
 }
 
 void Motor::update() {
-    // Обновление RPM
     unsigned long now = millis();
     unsigned long dt = now - _lastUpdateTime;
 
-    if (dt >= 100) { // Обновление каждые 100 мс
+    if (dt >= 100) {
         long currentCount = _encoderCount;
         long deltaCount = currentCount - _lastCount;
 
         if (dt > 0) {
             _currentRPM = (deltaCount * 60000.0) / (PULSES_PER_REVOLUTION * dt);
 
-            // Определение текущего направления
             if (deltaCount > 0) {
                 _currentDirection = 1;
             }
@@ -210,7 +193,6 @@ void Motor::update() {
         _lastUpdateTime = now;
     }
 
-    // Применение управления мотором
     applyMotorControl();
 }
 
