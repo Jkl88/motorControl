@@ -19,9 +19,6 @@
   </ItemGroup>
   <ItemGroup>
     <!-- <ClInclude Include="$(MSBuildThisFileDirectory)motorControl.h" /> -->
-	<!-- <ClInclude Include="$(MSBuildThisFileDirectory)motorControl.h" /> -->
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="$(MSBuildThisFileDirectory)src\motorControl.cpp" />
+    <!-- <ClInclude Include="$(MSBuildThisFileDirectory)motorControl.h" /> -->
   </ItemGroup>
 </Project>
