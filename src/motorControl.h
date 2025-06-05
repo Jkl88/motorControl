@@ -2,9 +2,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define MIN_PWM -255
 #define MAX_PWM 255
-#define PULSES_PER_REVOLUTION 60
 #define MAX_MOTORS 6
 
 // Абстрактный базовый класс для двигателя
@@ -36,7 +34,7 @@ public:
 private:
     void applyMotorControl();
     void applyPWM();
-    void handleInterrupt();
+    void handleInterrupt();	
 
     bool _singleHall;
     bool _waitingForStop;
@@ -55,6 +53,7 @@ private:
 
     static const int8_t _encoderStates[16];
     static HallMotor* _instances[MAX_MOTORS];
+    int _pulses_per_revolution;
 
     typedef void (*isr_func_t)();
     static void IRAM_ATTR _isrRouter0();

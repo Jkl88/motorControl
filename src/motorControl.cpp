@@ -21,6 +21,7 @@ HallMotor::HallMotor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t
     _encoderCount(0), _lastHallState(0), _currentDirection(0), _lastDirection(1),
     _directionChangeTime(0), _waitingForStop(false) {
     _singleHall = (hallBpin == 255);
+    _pulses_per_revolution = _singleHall ? 12 : 24;
 }
 
 void HallMotor::begin() {
@@ -81,7 +82,7 @@ void HallMotor::update() {
         long deltaCount = currentCount - _lastCount;
 
         if (dt > 0) {
-            _currentRPM = (deltaCount * 60000.0) / (PULSES_PER_REVOLUTION * dt);
+            _currentRPM = (deltaCount * 60000.0) / (_pulses_per_revolution * dt);
             _currentDirection = (deltaCount > 0) ? 1 : (deltaCount < 0 ? -1 : 0);
         }
 
