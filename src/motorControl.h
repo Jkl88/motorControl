@@ -2,9 +2,17 @@
 #pragma once
 #include <Arduino.h>
 
+#define MIN_PWM 255
 #define MAX_PWM 255
 #define MAX_MOTORS 6
 
+//Шаблон для вызова метода для всех объектов в массиве
+template <typename T, typename Method, typename... Args>
+void callForAll(T* objects, size_t count, Method method, Args&&... args) {
+    for (size_t i = 0; i < count; ++i) {
+        (objects[i].*method)(std::forward<Args>(args)...);
+    }
+}
 // Абстрактный базовый класс для двигателя
 class BaseMotor {
 public:
