@@ -1,75 +1,49 @@
-
+// motorControl.h
 #pragma once
 #include <Arduino.h>
 
-#define MIN_PWM 255
+#define MIN_PWM -255
 #define MAX_PWM 255
 #define MAX_MOTORS 6
 
-//Шаблон для вызова метода для всех объектов в массиве
-template <typename T, typename Method, typename... Args>
-void callForAll(T* objects, size_t count, Method method, Args&&... args) {
-    for (size_t i = 0; i < count; ++i) {
-        (objects[i].*method)(std::forward<Args>(args)...);
-    }
-}
-// Абстрактный базовый класс для двигателя
-class BaseMotor {
+class HallMotor {
 public:
-    virtual void begin() = 0;
-    virtual void setPwm(int pwm, bool brake = false) = 0;
-    virtual void update() = 0;
-    virtual float getRPM() = 0;
-    virtual int getDirection() = 0;
-    virtual ~BaseMotor() = default;
-};
+    HallMotor(uint8_t hallPin, uint8_t pwmPin, uint8_t pwmChannel,
+        uint8_t minPwm, uint8_t dirPin, uint8_t brakePin,
+        uint16_t rampTime = 200, uint16_t dirChangeDelay = 200);
 
-class HallMotor : public BaseMotor {
-public:
-    HallMotor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t minPwm,
-        uint8_t dirPin, uint8_t brakePin, uint16_t rampTime = 200, uint16_t dirChangeDelay = 200);
-
-    void begin() override;
-    void setPwm(int pwm, bool brake = false) override;
-    void update() override;
-    float getRPM() override;
-    int getDirection() override;
-
-    void setRampTime(uint16_t rampTime);
-    void setMinPwm(uint8_t minPwm);
-    void setDirChangeDelay(uint16_t delay);
+    void begin();
+    void setPwm(int pwm, bool brake = false);
+    void update();
+    float getRPM();
+    int getDirection();
+    void setPower(int power);
 
 private:
     void applyMotorControl();
+    void handleInterrupt();
     void applyPWM();
-    void handleInterrupt();	
+    void loger();
 
-    bool _singleHall;
-    bool _waitingForStop;
-    uint8_t _hallApin, _hallBpin, _pwmPin, _pwmCannel, _minPwm, _dirPin, _brakePin;
+    uint8_t _hallPin, _pwmPin, _pwmChannel, _minPwm, _maxPwm, _dirPin, _brakePin;
     int _targetPwm, _currentPwm;
-    bool _targetBrake, _brakeActive, _directionChangePending;
-    int _lastAppliedDirection, _currentDirection, _lastDirection;
-    uint16_t _rampTime, _rampIncrement, _dirChangeDelay;
-    unsigned long _lastRampTime, _directionChangeTime;
+    int _currentDir; // -1, 0, 1
+
+    uint16_t _rampTime, _dirChangeDelay;
+    unsigned long _lastRampTime, _directionChangeTime, _lastUpdateTime;
+
+    bool _waitingForStop, _directionChangePending;
+    bool _brake = true;
 
     volatile long _encoderCount;
     long _lastCount;
-    uint8_t _lastHallState;
     float _currentRPM;
-    unsigned long _lastUpdateTime;
 
-    static const int8_t _encoderStates[16];
     static HallMotor* _instances[MAX_MOTORS];
-    int _pulses_per_revolution;
-
-    typedef void (*isr_func_t)();
     static void IRAM_ATTR _isrRouter0();
     static void IRAM_ATTR _isrRouter1();
     static void IRAM_ATTR _isrRouter2();
     static void IRAM_ATTR _isrRouter3();
     static void IRAM_ATTR _isrRouter4();
     static void IRAM_ATTR _isrRouter5();
-
-    static const isr_func_t _isrRouters[MAX_MOTORS];
 };

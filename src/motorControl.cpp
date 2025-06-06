@@ -1,197 +1,177 @@
+// motorControl.cpp
 #include "motorControl.h"
 
+// Инициализация статического массива экземпляров
 HallMotor* HallMotor::_instances[MAX_MOTORS] = { nullptr };
-const HallMotor::isr_func_t HallMotor::_isrRouters[MAX_MOTORS] = {
-    HallMotor::_isrRouter0,
-    HallMotor::_isrRouter1,
-    HallMotor::_isrRouter2,
-    HallMotor::_isrRouter3,
-    HallMotor::_isrRouter4,
-    HallMotor::_isrRouter5
-};
 
-HallMotor::HallMotor(uint8_t hallApin, uint8_t hallBpin, uint8_t pwmPin, uint8_t pwmCannel, uint8_t minPwm,
-    uint8_t dirPin, uint8_t brakePin, uint16_t rampTime, uint16_t dirChangeDelay)
-    : _hallApin(hallApin), _hallBpin(hallBpin), _pwmPin(pwmPin),
-    _pwmCannel(pwmCannel), _minPwm(minPwm), _dirPin(dirPin), _brakePin(brakePin),
+// Конструктор класса HallMotor
+HallMotor::HallMotor(uint8_t hallPin, uint8_t pwmPin, uint8_t pwmChannel,
+    uint8_t minPwm, uint8_t dirPin, uint8_t brakePin,
+    uint16_t rampTime, uint16_t dirChangeDelay)
+    : _hallPin(hallPin), _pwmPin(pwmPin), _pwmChannel(pwmChannel),
+    _minPwm(minPwm), _dirPin(dirPin), _brakePin(brakePin),
     _rampTime(rampTime), _dirChangeDelay(dirChangeDelay),
-    _targetPwm(0), _currentPwm(0), _targetBrake(false),
-    _lastAppliedDirection(0), _brakeActive(false), _directionChangePending(false),
-    _rampIncrement(5), _lastCount(0), _currentRPM(0.0), _lastUpdateTime(0),
-    _encoderCount(0), _lastHallState(0), _currentDirection(0), _lastDirection(1),
-    _directionChangeTime(0), _waitingForStop(false) {
-    _singleHall = (hallBpin == 255);
-    _pulses_per_revolution = _singleHall ? 12 : 24;
+    _maxPwm(MAX_PWM), _targetPwm(0), _currentPwm(0), _currentDir(0),
+    _waitingForStop(false), _directionChangePending(false),
+    _lastRampTime(0), _directionChangeTime(0), _lastUpdateTime(0),
+    _encoderCount(0), _lastCount(0), _currentRPM(0.0f)
+{
 }
 
+// Инициализация пинов, таймеров и прерываний
 void HallMotor::begin() {
-    pinMode(_hallApin, INPUT_PULLUP);
-    if (!_singleHall) pinMode(_hallBpin, INPUT_PULLUP);
+    pinMode(_hallPin, INPUT_PULLUP);
+    pinMode(_pwmPin, OUTPUT);
     pinMode(_dirPin, OUTPUT);
     pinMode(_brakePin, OUTPUT);
-    pinMode(_pwmPin, OUTPUT);
 
-    digitalWrite(_brakePin, HIGH);
-    digitalWrite(_dirPin, LOW);
+    digitalWrite(_brakePin, LOW);  // brake ON by default
+    digitalWrite(_dirPin, HIGH);   // set to HIGH (не GND!)
 
-    ledcSetup(_pwmCannel, 5000, 8);
-    ledcAttachPin(_pwmPin, _pwmCannel);
-    ledcWrite(_pwmCannel, 0);
+    ledcSetup(_pwmChannel, 5000, 8); // частота 5 кГц, разрешение 8 бит
+    ledcAttachPin(_pwmPin, _pwmChannel);
+    ledcWrite(_pwmChannel, 0);
 
-    _lastHallState = (digitalRead(_hallApin) << 1) | (_singleHall ? 0 : digitalRead(_hallBpin));
-
+    // Привязка ISR к экземпляру
     for (int i = 0; i < MAX_MOTORS; i++) {
         if (_instances[i] == nullptr) {
             _instances[i] = this;
-            attachInterrupt(digitalPinToInterrupt(_hallApin), _isrRouters[i], CHANGE);
-            if (!_singleHall) attachInterrupt(digitalPinToInterrupt(_hallBpin), _isrRouters[i], CHANGE);
+            attachInterrupt(digitalPinToInterrupt(_hallPin),
+                i == 0 ? _isrRouter0 :
+                i == 1 ? _isrRouter1 :
+                i == 2 ? _isrRouter2 :
+                i == 3 ? _isrRouter3 :
+                i == 4 ? _isrRouter4 : _isrRouter5,
+                RISING);
             break;
         }
     }
 
-    _lastUpdateTime = millis();
     _lastRampTime = millis();
-    _encoderCount = 0;
+    _lastUpdateTime = millis();
+    _lastCount = 0;
 }
 
+// Установка новой цели для ШИМ и опциональная активация тормоза
 void HallMotor::setPwm(int pwm, bool brake) {
     pwm = constrain(pwm, MIN_PWM, MAX_PWM);
-    _targetPwm = pwm;
-    _targetBrake = brake;
-
-    if (_rampTime > 0) {
-        _rampIncrement = max(1, abs(_targetPwm - _currentPwm) * 20 / _rampTime);
-    }
-    else {
-        _rampIncrement = MAX_PWM + 1;
-    }
-
-    log_d("[setPwm] Target PWM: %d, Brake: %d", _targetPwm, _targetBrake);
+    _targetPwm = brake ? 0 : pwm;    
+    _brake = brake;
 }
 
-void HallMotor::setRampTime(uint16_t rampTime) { _rampTime = rampTime; }
-void HallMotor::setMinPwm(uint8_t minPwm) { _minPwm = minPwm; }
-void HallMotor::setDirChangeDelay(uint16_t delay) { _dirChangeDelay = delay; }
+void HallMotor::setPower(int power) {
+    _maxPwm = MAX_PWM * power;
+}
 
+// Основной метод обновления, вызывается в loop()
 void HallMotor::update() {
     unsigned long now = millis();
-    unsigned long dt = now - _lastUpdateTime;
-
-    if (dt >= 100) {
-        long currentCount = _encoderCount;
-        long deltaCount = currentCount - _lastCount;
-
-        if (dt > 0) {
-            _currentRPM = (deltaCount * 60000.0) / (_pulses_per_revolution * dt);
-            _currentDirection = (deltaCount > 0) ? 1 : (deltaCount < 0 ? -1 : 0);
-        }
-
-        log_d("[update] RPM: %.2f, Direction: %d", _currentRPM, _currentDirection);
-        _lastCount = currentCount;
+    loger();
+    // Расчет RPM раз в 100 мс
+    if (now - _lastUpdateTime >= 100) {
+        long deltaCount = _encoderCount - _lastCount;
+        _currentRPM = (deltaCount * 600.0) / 6.0; // упрощенная формула RPM (10 имп./сек = 50 об/мин)
+        _lastCount = _encoderCount;
         _lastUpdateTime = now;
     }
 
     applyMotorControl();
-}
-
-float HallMotor::getRPM() { return _currentRPM; }
-int HallMotor::getDirection() { return _currentDirection; }
-
-void HallMotor::applyMotorControl() {
-    if (_targetBrake) {
-        digitalWrite(_brakePin, LOW);
-        ledcWrite(_pwmCannel, 0);
-        _currentPwm = 0;
-        _brakeActive = true;
-        _directionChangePending = false;
-        _waitingForStop = false;
-        log_d("[brake] Brake active");
-        return;
-    }
-    else {
-        digitalWrite(_brakePin, HIGH);
-        _brakeActive = false;
-    }
-
-    int targetDir = (_targetPwm == 0) ? 0 : (_targetPwm > 0 ? 1 : -1);
-
-    if (targetDir != 0 && targetDir != _lastDirection) {
-        if (!_waitingForStop) {
-            if (abs(_currentRPM) > 1.0) {
-                digitalWrite(_brakePin, LOW);
-                ledcWrite(_pwmCannel, 0);
-                _waitingForStop = true;
-                log_d("[dir change] Waiting for stop. RPM=%.2f", _currentRPM);
-                return;
-            }
-            else {
-                _waitingForStop = true;
-                _directionChangeTime = millis();
-                log_d("[dir change] Stopped. Begin delay");
-                return;
-            }
-        }
-        else {
-            if (millis() - _directionChangeTime < _dirChangeDelay) {
-                digitalWrite(_brakePin, LOW);
-                ledcWrite(_pwmCannel, 0);
-                log_d("[dir change] In delay pause (%lu ms)", millis() - _directionChangeTime);
-                return;
-            }
-            _waitingForStop = false;
-            _lastDirection = targetDir;
-            log_d("[dir change] Direction changed to %d", _lastDirection);
-        }
-    }
-
-    if (millis() - _lastRampTime > 20) {
-        if (_currentPwm < _targetPwm) {
-            _currentPwm = min(_targetPwm, _currentPwm + _rampIncrement);
-        }
-        else if (_currentPwm > _targetPwm) {
-            _currentPwm = max(_targetPwm, _currentPwm - _rampIncrement);
-        }
-        _lastRampTime = millis();
-        log_d("[ramp] Current PWM: %d", _currentPwm);
-    }
-
     applyPWM();
 }
 
-void HallMotor::applyPWM() {
-    int pwmValue = map(abs(_currentPwm), 0, MAX_PWM, _minPwm, MAX_PWM);
-    int targetDir = (_currentPwm == 0) ? 0 : (_currentPwm > 0 ? 1 : -1);
-
-    digitalWrite(_dirPin, targetDir == 1 ? HIGH : LOW);
-    ledcWrite(_pwmCannel, pwmValue);
-
-    log_d("[PWM] Dir=%d, PWM=%d (mapped=%d)", targetDir, _currentPwm, pwmValue);
-    _lastAppliedDirection = targetDir;
+float HallMotor::getRPM() {
+    return _currentRPM;
 }
 
-void HallMotor::handleInterrupt() {
-    uint8_t a = digitalRead(_hallApin);
-    uint8_t b = _singleHall ? 0 : digitalRead(_hallBpin);
-    uint8_t newState = (a << 1) | b;
+int HallMotor::getDirection() {
+    return _currentDir;
+}
 
-    uint8_t state = (_lastHallState << 2) | newState;
-    int8_t change = _encoderStates[state & 0x0F];
+// Логика плавного разгона/торможения и смены направления
+void HallMotor::applyMotorControl() {
+    int targetDir = (_targetPwm == 0) ? 0 : (_targetPwm > 0 ? 1 : -1);
+    _targetPwm = abs(_targetPwm);
 
-    _encoderCount += (change == 0) ? (_lastDirection) : change;
-    if (change != 0) {
-        _lastDirection = (change > 0) ? 1 : -1;
+    //если тормоз или полная остановка перед сменой направления
+    if ((_currentDir != 0 && targetDir != 0 && targetDir != _currentDir) || _brake) {
+        _currentPwm = 0;
+        if (!_waitingForStop) {
+            digitalWrite(_brakePin, LOW); // активируем тормоз
+            ledcWrite(_pwmChannel, 0);
+            _waitingForStop = true;            
+            return;
+        }
+        //ждем остановку
+        if (_currentRPM != 0) { _directionChangeTime = millis(); return; }
+        // Ждем задержку перед сменой направления
+        if ((millis() - _directionChangeTime < _dirChangeDelay))  return;
+
+        // остановились        
+        _currentDir = 0;
+
+        if (_brake) return;
+    }
+    
+    else if (_waitingForStop){
+        digitalWrite(_brakePin, HIGH); // отпускаем тормоз
+        _waitingForStop = false;
+    }
+    
+    // плавный пуск если не задано setPwm = 0
+    if (targetDir != 0 && millis() - _lastRampTime > _rampTime) {
+        digitalWrite(_dirPin, targetDir == -1 ? HIGH : LOW);
+        digitalWrite(_brakePin, HIGH); // отпускаем тормоз 
+        // если текущее направление "стоим" и есть вращение а вращение не по заданному значение(самопроизвольно) ??????
+        if (_currentDir == 0 && _currentRPM != 0) _currentDir = targetDir;
+
+        if (_currentPwm < _targetPwm) {
+            _currentPwm = min(_targetPwm, _currentPwm + 1);
+        }
+
+        else _currentPwm = _targetPwm;
+
+        _lastRampTime = millis();
     }
 
-    _lastHallState = newState;
-    log_d("[ISR] A=%d B=%d Count=%ld", a, b, _encoderCount);
+    if (targetDir == 0) { 
+        _currentPwm = 0;
+        if (_currentRPM == 0) {
+            _currentDir = 0;
+            _brake; // активируем тормоз
+        }
+    }    
 }
 
-const int8_t HallMotor::_encoderStates[16] = {
-    0, -1, 1, 0,
-    1, 0, 0, -1,
-    -1, 0, 0, 1,
-    0, 1, -1, 0
-};
+void HallMotor::loger() {
+#if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_DEBUG
+    static unsigned long lastTime;
+    if (millis() - lastTime >= 500) {
+        Serial.printf(
+            "======================================================\n"
+            "PWM min:%d, max:%d, target:%d, current:%d\n"
+            "RPM current:%d, encoderCount:%d\n"
+            "DIR current:%d\n"
+            "Time ramp:%d, dirChange:%d\n",
+            _minPwm, maxPWM, _targetPwm, _currentPwm,
+            _currentRPM, _encoderCount,
+            _currentDir,
+            _rampTime, _dirChangeDelay
+        );
+        lastTime = millis();
+    }
+#endif    
+}
+
+// Применение текущего PWM к пину
+void HallMotor::applyPWM() {
+    int pwmValue = map(_currentPwm, 0, MAX_PWM, _minPwm, _maxPwm);
+    ledcWrite(_pwmChannel, pwmValue);
+}
+
+// Прерывание от холла: увеличиваем счетчик
+void HallMotor::handleInterrupt() {
+    _encoderCount++;
+}
 
 // ISR роутеры
 void IRAM_ATTR HallMotor::_isrRouter0() { if (_instances[0]) _instances[0]->handleInterrupt(); }
